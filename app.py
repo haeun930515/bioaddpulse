@@ -26,6 +26,8 @@ def estimate_average_pulserate(arr, srate, window_size):
     return int(f[max_peak_idx] * 60)
 
 def detrend_signal(arr, win_size):
+    if not arr:
+        return arr  # 또는 적절한 초기값을 반환
     if not isinstance(win_size, int):
         win_size = int(win_size)
     length = len(arr)
