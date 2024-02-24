@@ -3,11 +3,38 @@ from werkzeug.utils import secure_filename
 import cv2
 import numpy as np
 from scipy import signal
+from scipy.signal import find_peaks
 
 app = Flask(__name__)
 
-band = (42, 180)
-win_size = 900
+# 혈압 값들의 스케일링 팩터
+bp_dia_min, bp_dia_max = 60, 120
+bp_sys_min, bp_sys_max = 90, 140
+
+# Spo2 값의 스케일링 팩터
+spo2_min, spo2_max = 94, 98
+
+# 스케일링 함수
+def scale_to_mmHg(value, value_min, value_max, mmHg_min, mmHg_max):
+    return ((value - value_min) / (value_max - value_min)) * (mmHg_max - mmHg_min) + mmHg_min
+
+def scale_to_spo2(value, value_min, value_max, spo2_min, spo2_max):
+    return ((value - value_min) / (value_max - value_min)) * (spo2_max - spo2_min) + spo2_min
+
+def diastolic_idx(signal, points):
+    poly_ppg = np.polyfit(points, signal, 12)
+    poly_grad1 = np.polyder(poly_ppg)
+    poly_grad2 = np.polyder(poly_grad1)
+    val_grad1 = np.polyval(poly_grad1, points)
+    val_grad2 = np.polyval(poly_grad2, points)
+    grad1_vlys, _ = find_peaks(-val_grad1)
+    if len(grad1_vlys) < 1:
+        return points[len(points)//4*3]
+    grad1_min = grad1_vlys[0]
+    grad2_vlys, _ = find_peaks(-val_grad2[grad1_min:])
+    if len(grad2_vlys) < 1:
+        return points[len(points)//4*3]
+    return grad2_vlys[-1] + grad1_min  # diastolic minimum position
 
 def calculate_value(img):
     return np.mean(img[:, :, 1])
@@ -15,6 +42,12 @@ def calculate_value(img):
 def filter_bandpass(arr, fps, band):
     nyq = 60 * fps / 2
     coefficients = signal.butter(5, [band[0] / nyq, band[1] / nyq], 'bandpass')
+    return signal.filtfilt(*coefficients, arr)
+
+def filter_ppg_band(arr, fps):
+    nyq = 60 * fps / 2
+    ppg_band = (0.75 / nyq, 4.0 / nyq)
+    coefficients = signal.butter(5, ppg_band, 'bandpass')
     return signal.filtfilt(*coefficients, arr)
 
 def estimate_average_pulserate(arr, srate, window_size):
@@ -32,6 +65,33 @@ def detrend_signal(arr, win_size):
     norm = np.convolve(np.ones(length), np.ones(win_size), mode='same')
     mean = np.convolve(arr, np.ones(win_size), mode='same') / norm
     return (arr - mean) / mean
+
+def ppg_for_spo2(ppg_sig):
+    # PPG 신호에서 IR 및 Red 센서 값을 추출
+    ppg_red = np.array(ppg_sig)
+    ppg_ir = 1.5 * ppg_red
+
+    # NaN 및 0 값 처리
+    ppg_ir = np.where(np.isnan(ppg_ir), 1e-16, ppg_ir)
+    ppg_red = np.where(np.isnan(ppg_red), 1e-16, ppg_red)
+
+    ppg_ir = np.where(ppg_ir == 0, 1e-16, ppg_ir)
+    ppg_red = np.where(ppg_red == 0, 1e-16, ppg_red)
+    
+    baseline_data_red = movmean1(ppg_red, 25)
+    acDivDcRed = ppg_red / baseline_data_red
+
+    # AC/DC 적외선 계산
+    baseline_data_ir = movmean1(ppg_ir, 25)
+    acDivDcIr = ppg_ir / baseline_data_ir
+    
+    R_values = (acDivDcRed / acDivDcIr).tolist()
+    
+    return R_values
+
+def movmean1(A, k):
+    x = np.convolve(A, np.ones(k)/k, mode='same')
+    return x
 
 @app.route('/process_video', methods=['POST'])
 def process_video():
@@ -86,12 +146,38 @@ def process_video():
 
         det = detrend_signal(red_signals, 30)
         filtered = filter_bandpass(det, 30, (42, 180))
+        filterppg = filter_ppg_band(det, 30)
         heart_rate = estimate_average_pulserate(filtered, 30.0, 900)
+
+        ppg_filtered = filter_ppg_band(det, 30)  # PPG 주파수 대역만 추출
+
+        # diastolic index 계산
+        t_idx = np.arange(0, len(ppg_filtered))  # index vector, needed for evaluation
+        diast_idx = diastolic_idx(ppg_filtered, t_idx)
 
         cap.release()
         cv2.destroyAllWindows()
 
-        return jsonify({'result': 'Success', 'heart_rate': heart_rate})
+        # blood pressure sys, dia는 여기서 계산
+        bp_sys = np.max(filterppg)
+        bp_dia = np.min(filterppg)
+        
+        # SpO2 계산
+        R_values = ppg_for_spo2(filterppg)
+        spo2_list = [110 - 25 * ((R - 0.7) / (1 - 0.7)) for R in R_values]
+        
+        # Spo2 값의 평균 계산
+        spo2_mean = np.mean(spo2_list)
+        spo2_maxi = np.max(spo2_list)
+        
+        # SpO2 값의 스케일링
+        spo2_scaled = scale_to_spo2(spo2_mean, min(spo2_list), spo2_maxi, spo2_min, spo2_max)
+
+        # 혈압 값들을 mmHg로 스케일링
+        bp_dia_mmHg = scale_to_mmHg(bp_dia, -1, 1, bp_dia_min, bp_dia_max)
+        bp_sys_mmHg = scale_to_mmHg(bp_sys, -1, 1, bp_sys_min, bp_sys_max)
+
+        return jsonify({'result': 'Success', 'heart_rate': heart_rate, 'bp_sys': bp_sys_mmHg, 'bp_dia': bp_dia_mmHg, 'spo2': spo2_scaled})
 
 if __name__ == '__main__':
     app.run(debug=True)
