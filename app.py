@@ -59,6 +59,8 @@ def estimate_average_pulserate(arr, srate, window_size):
     return int(f[max_peak_idx] * 60)
 
 def detrend_signal(arr, win_size):
+    if not arr:
+        return arr  # 또는 적절한 초기값을 반환
     if not isinstance(win_size, int):
         win_size = int(win_size)
     length = len(arr)
@@ -96,12 +98,12 @@ def movmean1(A, k):
 @app.route('/process_video', methods=['POST'])
 def process_video():
     if 'file' not in request.files:
-        return jsonify({'error': 'No file part'})
+        return jsonify({'error': 'No file part', 'heart_rate': -1})
 
     file = request.files['file']
 
     if file.filename == '':
-        return jsonify({'error': 'No selected file'})
+        return jsonify({'error': 'No selected file', 'heart_rate': -1})
 
     if file:
         filename = secure_filename(file.filename)
@@ -124,19 +126,12 @@ def process_video():
             if not is_detected:
                 faces = face_cascade.detectMultiScale(gray, 1.3, 5)
                 if len(faces) > 0:
-                    max = 0
-                    for i in range(1, (len(faces))):
-                        if i == 1:
-                            if faces[i-1][2] > faces[i][2]:
-                                max = i-1
-                            else:
-                                max = i
-                        else:
-                            if faces[i][2] > faces[max][2]:
-                                max = i
-                        i += 1
-                    x, y, w, h = faces[max]
+                    max_face_index = np.argmax(faces[:, 2])  # Index of the face with maximum width
+                    x, y, w, h = faces[max_face_index]
                     is_detected = True
+                else:
+                    # Face not detected
+                    return jsonify({'error': 'Face not detected', 'heart_rate': -1})
 
             if w != 0:
                 face = frame[y:y+h, x:x+w]
