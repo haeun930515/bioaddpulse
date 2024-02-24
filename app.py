@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 from werkzeug.utils import secure_filename
 import cv2
 import numpy as np
+import os
 from scipy import signal
 from scipy.signal import find_peaks
 
@@ -172,6 +173,7 @@ def process_video():
         bp_dia_mmHg = scale_to_mmHg(bp_dia, -1, 1, bp_dia_min, bp_dia_max)
         bp_sys_mmHg = scale_to_mmHg(bp_sys, -1, 1, bp_sys_min, bp_sys_max)
 
+        os.remove(file.filename)
         return jsonify({'result': 'Success', 'heart_rate': heart_rate, 'bp_sys': bp_sys_mmHg, 'bp_dia': bp_dia_mmHg, 'spo2': spo2_scaled})
 
 if __name__ == '__main__':
