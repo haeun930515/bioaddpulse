@@ -132,6 +132,7 @@ def process_video():
                     is_detected = True
                 else:
                     # Face not detected
+                    os.remove(file.filename)
                     return jsonify({'error': 'Face not detected', 'heart_rate': -1})
 
             if w != 0:
@@ -178,4 +179,5 @@ def process_video():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
+    # app.run(debug=True)
 
