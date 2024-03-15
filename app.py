@@ -127,8 +127,19 @@ def process_video():
             if not is_detected:
                 faces = face_cascade.detectMultiScale(gray, 1.3, 5)
                 if len(faces) > 0:
-                    max_face_index = np.argmax(faces[:, 2])  # Index of the face with maximum width
-                    x, y, w, h = faces[max_face_index]
+                    max = 0
+                    #find bigger face
+                    for i in range(1,(len(faces))):
+                        if i == 1:
+                            if faces[i-1][2] > faces[i][2]:
+                                max = i-1
+                            else:
+                                max = i
+                        else:
+                            if faces[i][2] > faces[max][2]:
+                                max = i
+                        i+=1
+                    x, y, w, h = faces[max]
                     is_detected = True
                 else:
                     # Face not detected
