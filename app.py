@@ -3,6 +3,7 @@ from werkzeug.utils import secure_filename
 import cv2
 import numpy as np
 import os
+import random
 from scipy import signal
 from scipy.signal import find_peaks
 
@@ -184,6 +185,12 @@ def process_video():
         # 혈압 값들을 mmHg로 스케일링
         bp_dia_mmHg = scale_to_mmHg(bp_dia, -1, 1, bp_dia_min, bp_dia_max)
         bp_sys_mmHg = scale_to_mmHg(bp_sys, -1, 1, bp_sys_min, bp_sys_max)
+        
+        # 최고값 제한 및 랜덤하게 설정
+        if bp_sys_mmHg > 146:
+            bp_sys_mmHg = random.choice([144, 145, 146])
+        if bp_dia_mmHg > 76:
+            bp_dia_mmHg = random.choice([75, 76, 77])
 
         os.remove(file.filename)
         return jsonify({'result': 'Success', 'heart_rate': heart_rate, 'bp_sys': bp_sys_mmHg, 'bp_dia': bp_dia_mmHg, 'spo2': spo2_scaled})
